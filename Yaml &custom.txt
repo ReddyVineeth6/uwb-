@@ -1,0 +1,169 @@
+ Yaml :
+
+  
+  includes:
+    - "/config/esphome/uwb1.h" 
+    
+
+  libraries :
+    -  "Adafruit BusIO"
+    -  "Adafruit SPI"
+    - "https://github.com/Decawave/dwm1001-examples"  (Utilisez cette bibliothèque)
+  #  - "https://github.com/platformio/platform-nordicnrf52"
+    -   "nordicnrf5@5.2.0 "
+   # -  "Adafruit nRF52 Libraries@0.17.2"
+    
+  platformio_options:
+    lib_deps:
+      - nRF5_SDK_14.2.0_17b948a
+
+Spi ------
+
+  
+sensor:
+  - platform: custom
+    lambda: |-
+      auto my_sensor = new DWM1001Sensor();
+      App.register_component(my_sensor);
+      return {my_sensor ->distance_sensor};                  
+
+    sensors:
+      - name: " Distance Sensor"
+        unit_of_measurement: m    
+        accuracy_decimals: 2
+        icon: "mdi:ruler"        
+
+        
+
+Custom code :
+
+
+#include "esphome.h"
+#include <SPI.h>
+#include <deca_device_api.h>
+#include <deca_regs.h>
+#include "nrf_drv_spi.h"
+
+
+//class DWM1001Sensor : public PollingComponent, public spi::SPIDevice
+
+class DWM1001Sensor : public PollingComponent  {
+ public:
+ 
+  Sensor *distance_sensor = new Sensor();
+
+//  DWM1001Sensor(spi::Bus SPI_bus, uint8_t ss_pin, uint8_t reset_pin, uint8_t irq_pin, uint32_t update_interval) :
+//    PollingComponent(update_interval), spi::SPIDevice(SPI_bus, ss_pin), reset_pin_(reset_pin), irq_pin_(irq_pin) {}
+
+DWM1001Sensor() : PollingComponent(15000) {}
+
+//int reset_pin_ = 10;  //  pin number 
+//int irq_pin_ = 2;    // replace 2 with the actual pin number
+//int ss_pin_ = 10;    // define ss_pin_ as pin 10
+// Declare rx_buffer at the global scope
+//uint8_t rx_buffer[1024];
+
+private:
+  uint8_t reset_pin_;
+  uint8_t irq_pin_;
+  uint8_t  ss_pin_;
+  uint8_t rx_buffer_[128];
+  uint16_t rx_length_;
+
+void setup() override {
+  
+    // reset the DWM1001 module
+    
+    pinMode(reset_pin_, OUTPUT);
+    digitalWrite(reset_pin_, LOW);
+    delay(10);
+    digitalWrite(reset_pin_, HIGH);
+    delay(10);
+    
+
+    // initialize the SPI interface
+    
+    SPI.begin();
+    SPI.setBitOrder(MSBFIRST);
+    SPI.setDataMode(SPI_MODE0);
+    pinMode(irq_pin_, INPUT_PULLUP);
+    pinMode(ss_pin_, OUTPUT);
+    digitalWrite(ss_pin_, HIGH);
+    
+
+    // initialize the DWM1001 module
+    
+    
+    dwt_config_t config = {};
+    config.chan = 5;
+    config.prf = DWT_PRF_64M;
+    config.txPreambLength = DWT_PLEN_64;
+    config.rxPAC = DWT_PAC32;
+    config.rxCode = 9;
+    config.nsSFD = 1;
+    dwt_init(&config);
+    dwt_configure(&config);
+    
+   
+
+  }
+
+  void update() override {
+  
+    // configure the DWM1001 module for distance measurement and localization
+    
+    dwt_forcetrxoff();
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+      // read the distance measurement and localization data from the DWM1001 module
+      
+    dwt_readrxdata(rx_buffer_, rx_length_, 0);
+
+      // parse the distance measurement and localization data
+      
+      if (rx_length_ >= 13) {
+        uint32_t distance = 0;
+        distance |= rx_buffer_[1] << 24;
+        distance |= rx_buffer_[2] << 16;
+        distance |= rx_buffer_[3] << 8;
+        distance |= rx_buffer_[4];
+        uint32_t quality = 0;
+        quality |= rx_buffer_[5] << 8;
+        quality |= rx_buffer_[6];
+       // float x_pos = 0.0;
+        uint32_t x_pos = 0;
+        x_pos |= rx_buffer_[7] << 24;
+        x_pos |= rx_buffer_[8] << 16;
+        x_pos |= rx_buffer_[9] << 8;
+        x_pos |= rx_buffer_[10];
+      //  memcpy(&x_pos, &x_pos_int, sizeof(x_pos));
+       // float y_pos = 0.0;
+        uint32_t y_pos = 0;
+        y_pos |= rx_buffer_[11] << 24;
+        y_pos |= rx_buffer_[12] << 16;
+        y_pos |= rx_buffer_[13] << 8;
+        y_pos |= rx_buffer_[14];
+     //   memcpy(&y_pos, &y_pos_int, sizeof(y_pos));
+
+        // publish the distance measurement and localization data  f
+        
+        ESP_LOGD("DWM1001Sensor", "distance = %u, quality = %u, x_pos = %u, y_pos = %u", distance, quality, x_pos, y_pos);
+        
+        //publish_state(distance);
+        
+        distance_sensor->publish_state(distance / 1000.0);      // convert from millimetres to meters before publishing the dist values
+      }
+    }
+};
+
+
+
+
+
+
+
+
+
+
